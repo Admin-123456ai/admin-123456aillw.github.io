@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>放射科综合管理系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+        body { background: #f4f7fc; padding: 16px; }
+        .container { max-width: 480px; margin: auto; }
+        h1 { font-size: 1.6rem; color: #1a365d; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .card { background: white; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .card h2 { font-size: 1.1rem; color: #2d3748; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        input, select { width: 100%; padding: 10px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 10px; font-size: 1rem; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #4299e1; color: white; }
+        .btn-primary:hover { background: #3182ce; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-success:hover { background: #38a169; }
+        .btn-danger { background: #fc8181; color: white; }
+        .btn-danger:hover { background: #f56565; }
+        .btn-warning { background: #ecc94b; color: #744210; }
+        .btn-warning:hover { background: #d69e2e; }
+        .tag { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+        .tag-green { background: #c6f6d5; color: #22543d; }
+        .tag-yellow { background: #fefcbf; color: #744210; }
+        .tag-red { background: #fed7d7; color: #9b2c2c; }
+        .tag-blue { background: #bee3f8; color: #2a4365; }
+        .room-status { text-align: center; padding: 12px; border-radius: 12px; background: #f7fafc; cursor: pointer; }
+        .room-status .icon { font-size: 2rem; }
+        .doctor-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+        .doctor-item:last-child { border-bottom: none; }
+        .notification { background: #ebf8ff; border-left: 4px solid #4299e1; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 0.9rem; }
+        .badge { background: #fc8181; color: white; border-radius: 50%; padding: 2px 8px; font-size: 0.8rem; }
+        .mt-8 { margin-top: 8px; }
+        .loading { text-align: center; padding: 20px; color: #718096; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🏥 放射科 <span style="font-size:0.8rem;color:#718096;" id="clock"></span></h1>
+
+    <div class="card">
+        <h2>📢 信息通知 <span class="badge" id="notifBadge">0</span></h2>
+        <div id="notificationList"><div class="loading">加载中...</div></div>
+        <div class="grid-2 mt-8">
+            <input type="text" id="notifInput" placeholder="输入通知内容" />
+            <button class="btn-primary" onclick="addNotification()">发布</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>✅ 医生签到</h2>
+        <div id="doctorList"><div class="loading">加载中...</div></div>
+        <div class="grid-2 mt-8">
+            <input type="text" id="doctorNameInput" placeholder="医生姓名" />
+            <button class="btn-success" onclick="checkIn()">签到</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🖥️ 机房状态</h2>
+        <div class="grid-3" id="roomGrid"><div class="loading">加载中...</div></div>
+    </div>
+
+    <div class="card">
+        <h2>📅 排班管理</h2>
+        <div class="grid-2">
+            <select id="scheduleDoctorSelect"><option>加载医生中...</option></select>
+            <input type="date" id="scheduleDate" />
+        </div>
+        <div class="grid-2">
+            <select id="scheduleShift">
+                <option value="早班">早班</option>
+                <option value="晚班">晚班</option>
+                <option value="夜班">夜班</option>
+            </select>
+            <button class="btn-primary" onclick="addSchedule()">添加排班</button>
+        </div>
+        <div id="scheduleList" style="margin-top:12px;"><div class="loading">加载中...</div></div>
+    </div>
+</div>
+
+<script>
+// ✅ 你的 Supabase 配置（已使用可公开密钥）
+const SUPABASE_URL = 'https://udgcmxpiamvnkwnnrgiq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_jhjH9nD7Ow-cYWu0uz4vQg_5w_rj4uM';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ========== 时钟 ==========
+function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleString('zh-CN', { hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ========== 通知 ==========
+async function loadNotifications() {
+    const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
+    const list = document.getElementById('notificationList');
+    const badge = document.getElementById('notifBadge');
+    list.innerHTML = (data || []).map(n => `<div class="notification">${n.text}</div>`).join('');
+    badge.textContent = (data || []).length;
+}
+
+async function addNotification() {
+    const input = document.getElementById('notifInput');
+    if (!input.value.trim()) return;
+    const { error } = await supabase.from('notifications').insert([{ text: input.value }]);
+    if (error) { alert('发布失败: ' + error.message); return; }
+    input.value = '';
+    await loadNotifications();
+}
+
+// ========== 医生签到 ==========
+async function loadDoctors() {
+    const { data, error } = await supabase.from('doctors').select('*').order('created_at', { ascending: false });
+    if (error) { console.error(error); return; }
+    const list = document.getElementById('doctorList');
+    list.innerHTML = (data || []).map(d => `
+        <div class="doctor-item">
+            <span>${d.name} <span class="tag tag-green">已签到</span></span>
+            <button class="btn-danger" style="width:auto;padding:4px 12px;" onclick="removeDoctor(${d.id})">移除</button>
+        </div>
+    `).join('');
+    updateDoctorSelect();
+}
+
+async function checkIn() {
+    const name = document.getElementById('doctorNameInput').value.trim();
+    if (!name) return alert('请输入医生姓名');
+    const { data } = await supabase.from('doctors').select('name').eq('name', name);
+    if (data && data.length > 0) return alert('该医生已签到');
+    const { error } = await supabase.from('doctors').insert([{ name }]);
+    if (error) { alert('签到失败: ' + error.message); return; }
+    document.getElementById('doctorNameInput').value = '';
+    await loadDoctors();
+}
+
+async function removeDoctor(id) {
+    const { error } = await supabase.from('doctors').delete().eq('id', id);
+    if (error) { alert('移除失败: ' + error.message); return; }
+    await loadDoctors();
+}
+
+function updateDoctorSelect() {
+    const select = document.getElementById('scheduleDoctorSelect');
+    supabase.from('doctors').select('name').then(({ data }) => {
+        select.innerHTML = '<option value="">选择医生</option>' + 
+            (data || []).map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+    });
+}
+
+// ========== 机房状态 ==========
+async function loadRooms() {
+    const { data, error } = await supabase.from('rooms').select('*').order('id');
+    if (error) { console.error(error); return; }
+    const grid = document.getElementById('roomGrid');
+    grid.innerHTML = (data || []).map(r => `
+        <div class="room-status" onclick="toggleRoomStatus(${r.id}, '${r.status}')">
+            <div class="icon">🖥️</div>
+            <div style="font-weight:600;">${r.name}</div>
+            <div><span class="tag ${r.status === '空闲' ? 'tag-green' : r.status === '使用中' ? 'tag-yellow' : 'tag-red'}">${r.status}</span></div>
+        </div>
+    `).join('');
+}
+
+async function initializeRooms() {
+    const { data } = await supabase.from('rooms').select('id');
+    if (!data || data.length === 0) {
+        const defaultRooms = [
+            { id: 1, name: 'CT-1', status: '空闲' },
+            { id: 2, name: 'CT-2', status: '使用中' },
+            { id: 3, name: 'MRI-1', status: '空闲' },
+            { id: 4, name: 'MRI-2', status: '维修' },
+            { id: 5, name: 'DR-1', status: '空闲' },
+            { id: 6, name: 'DR-2', status: '空闲' }
+        ];
+        const { error } = await supabase.from('rooms').insert(defaultRooms);
+        if (error) console.error('初始化机房失败:', error);
+    }
+    await loadRooms();
+}
+
+async function toggleRoomStatus(id, currentStatus) {
+    const statuses = ['空闲', '使用中', '维修'];
+    const idx = statuses.indexOf(currentStatus);
+    const newStatus = statuses[(idx + 1) % statuses.length];
+    const { error } = await supabase.from('rooms').update({ status: newStatus }).eq('id', id);
+    if (error) { alert('更新失败: ' + error.message); return; }
+    await loadRooms();
+}
+
+// ========== 排班 ==========
+async function loadSchedules() {
+    const { data, error } = await supabase.from('schedules').select('*').order('date', { ascending: false });
+    if (error) { console.error(error); return; }
+    const list = document.getElementById('scheduleList');
+    if (!data || data.length === 0) {
+        list.innerHTML = '<p style="color:#a0aec0;">暂无排班</p>';
+        return;
+    }
+    list.innerHTML = data.map(s => `
+        <div class="doctor-item">
+            <span>${s.doctor_name} | ${s.date} | <span class="tag tag-blue">${s.shift}</span></span>
+            <button class="btn-danger" style="width:auto;padding:4px 12px;" onclick="removeSchedule(${s.id})">删除</button>
+        </div>
+    `).join('');
+}
+
+async function addSchedule() {
+    const doctor = document.getElementById('scheduleDoctorSelect').value;
+    const date = document.getElementById('scheduleDate').value;
+    const shift = document.getElementById('scheduleShift').value;
+    if (!doctor || !date) return alert('请选择医生和日期');
+    const { error } = await supabase.from('schedules').insert([{ doctor_name: doctor, date, shift }]);
+    if (error) { alert('添加排班失败: ' + error.message); return; }
+    await loadSchedules();
+}
+
+async function removeSchedule(id) {
+    const { error } = await supabase.from('schedules').delete().eq('id', id);
+    if (error) { alert('删除失败: ' + error.message); return; }
+    await loadSchedules();
+}
+
+// ========== 初始化 ==========
+async function init() {
+    await initializeRooms();
+    await loadDoctors();
+    await loadSchedules();
+    await loadNotifications();
+}
+init();
+</script>
+</body>
+</html>
